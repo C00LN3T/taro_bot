@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 if __package__ in {None, ""}:
@@ -26,7 +27,7 @@ def create_dispatcher(config: BotConfig) -> Dispatcher:
 async def main() -> None:
     config = BotConfig.load()
     init_db(config)
-    bot = Bot(token=config.token, parse_mode=ParseMode.HTML)
+    bot = Bot(token=config.token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = create_dispatcher(config)
     await dp.start_polling(bot)
 
