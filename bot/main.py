@@ -1,12 +1,17 @@
 import asyncio
 import logging
+import sys
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 
-from .config import BotConfig
-from .db import init_db
-from .handlers import router
+if __package__ in {None, ""}:
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from bot.config import BotConfig
+from bot.db import init_db
+from bot.handlers import router
 
 logging.basicConfig(level=logging.INFO)
 
