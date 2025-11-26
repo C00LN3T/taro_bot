@@ -152,7 +152,7 @@ async def cmd_language(message: Message, state: FSMContext) -> None:
     await message.answer(t("ask_language", lang))
 
 
-@router.message(ProfileStates.waiting_for_language, F.text.lower().in_("ru", "en"))
+@router.message(ProfileStates.waiting_for_language, F.text.lower().in_({"ru", "en"}))
 async def set_language(message: Message, state: FSMContext) -> None:
     with session_scope(CONFIG.database_url) as session:
         user = get_or_create_user(
@@ -260,7 +260,7 @@ async def profile_delete_request(message: Message, state: FSMContext) -> None:
     await message.answer(t("delete_confirm", lang))
 
 
-@router.message(ProfileStates.confirming_delete, F.text.lower().in_("да", "yes"))
+@router.message(ProfileStates.confirming_delete, F.text.lower().in_({"да", "yes"}))
 async def profile_delete_confirm(message: Message, state: FSMContext) -> None:
     with session_scope(CONFIG.database_url) as session:
         user = ensure_user(session, message)
@@ -272,7 +272,7 @@ async def profile_delete_confirm(message: Message, state: FSMContext) -> None:
     await reset_to_menu(message, lang, state, t("delete_done", lang))
 
 
-@router.message(ProfileStates.confirming_delete, F.text.lower().in_("нет", "no"))
+@router.message(ProfileStates.confirming_delete, F.text.lower().in_({"нет", "no"}))
 async def profile_delete_cancel(message: Message, state: FSMContext) -> None:
     with session_scope(CONFIG.database_url) as session:
         user = ensure_user(session, message)
