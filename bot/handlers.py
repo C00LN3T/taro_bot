@@ -5,6 +5,7 @@ import json
 import logging
 from datetime import datetime, time, timedelta
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 import matplotlib
@@ -39,6 +40,7 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 CONFIG = BotConfig.load()
+VIDEO_PATH = Path(__file__).resolve().parents[1] / "video" / "elvira_gadalka.mp4"
 
 
 async def maybe_delay_response(session) -> None:
@@ -303,6 +305,10 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         referral_settings = get_referral_settings(session)
         referral_result = apply_referral(session, user, start_payload, referral_settings, is_new)
         lang = get_language(user)
+    if is_new and VIDEO_PATH.exists():
+        await message.answer_video(
+            BufferedInputFile(VIDEO_PATH.read_bytes(), filename=VIDEO_PATH.name)
+        )
     await state.set_state(ProfileStates.waiting_for_language)
     await message.answer(t("welcome", lang), reply_markup=main_menu_markup(lang))
     if referral_result.bonus_applied and referral_result.inviter:
