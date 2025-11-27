@@ -2,7 +2,7 @@ from __future__ import annotations
 
 MESSAGES = {
     "ru": {
-        "welcome": "Привет! Я бот-Гадалка. Помогу сделать расклад по таро, нумерологии или астрологии.",
+        "welcome": "Привет! Я бот-Гадалка. Помогу сделать расклад по таро.",
         "help": "Доступные команды:\n/menu — главное меню\n/profile — показать профиль\n/language — сменить язык\nИспользуйте кнопки ниже.",
         "ask_language": "Выберите язык (ru/en). По умолчанию — ru.",
         "ask_name": "Введите имя/ник (можно оставить текущее)",
@@ -32,6 +32,7 @@ MESSAGES = {
         "delete_prompt": "Пожалуйста, ответьте 'да' или 'нет'.",
         "limit_info": "Осталось бесплатных раскладов сегодня: {remaining}",
         "random_result": "Случайный расклад ({system}):\n{result}",
+        "feature_unavailable": "Сейчас работаем над Таро. Другие направления временно недоступны.",
         "metaphor": "Метафора дня: {text}",
         "rune": "Руна дня: {name} — {meaning}",
         "admin_panel": "Админ-панель. Выберите действие:",
@@ -39,7 +40,7 @@ MESSAGES = {
         "admin_broadcast_cancel": "Рассылка отменена.",
     },
     "en": {
-        "welcome": "Hi! I'm the Fortune Teller bot. I can draw tarot, numerology or astrology spreads for you.",
+        "welcome": "Hi! I'm the Fortune Teller bot. I can draw tarot spreads for you.",
         "help": "Available commands:\n/menu — main menu\n/profile — profile\n/language — choose language\nUse the buttons below.",
         "ask_language": "Choose language (ru/en). Default is ru.",
         "ask_name": "Send your name/nickname (or keep current)",
@@ -69,6 +70,7 @@ MESSAGES = {
         "delete_prompt": "Please answer 'yes' or 'no'.",
         "limit_info": "Free draws left today: {remaining}",
         "random_result": "Random spread ({system}):\n{result}",
+        "feature_unavailable": "We're focusing on Tarot right now. Other features are temporarily unavailable.",
         "metaphor": "Metaphor of the day: {text}",
         "rune": "Rune of the day: {name} — {meaning}",
         "admin_panel": "Admin panel. Choose an action:",
@@ -81,9 +83,6 @@ MESSAGES = {
 BUTTONS = {
     "ru": {
         "tarot": "🔮 Таро",
-        "numerology": "🔢 Нумерология",
-        "astro": "🪐 Астрология / Космо",
-        "random": "🎁 Случайный расклад",
         "another": "Сделать ещё",
         "share": "Поделиться",
         "profile": "⭐ Мой профиль",
@@ -110,9 +109,6 @@ BUTTONS = {
     },
     "en": {
         "tarot": "🔮 Tarot",
-        "numerology": "🔢 Numerology",
-        "astro": "🪐 Astrology / Cosmo",
-        "random": "🎁 Random reading",
         "another": "Do one more",
         "share": "Share",
         "profile": "⭐ My profile",
