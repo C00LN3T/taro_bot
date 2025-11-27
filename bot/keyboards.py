@@ -48,3 +48,12 @@ def result_actions_keyboard(lang: str = "ru", share_payload: str | None = None) 
     if share_payload:
         buttons.insert(1, [InlineKeyboardButton(text=button_text("share", lang), switch_inline_query=share_payload)])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def admin_panel_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(text=button_text("admin_stats", lang), callback_data="admin_stats")],
+        [InlineKeyboardButton(text=button_text("admin_broadcast", lang), callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text=button_text("admin_back", lang), callback_data="admin_back")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

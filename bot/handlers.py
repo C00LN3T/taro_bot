@@ -22,7 +22,7 @@ from .db import get_or_create_user, session_scope
 from .localization import BUTTONS, button_text, t
 from .models import SpreadHistory, User
 from .services import astrology, extra, numerology, tarot
-from .states import AstroStates, NumerologyStates, ProfileStates, TarotStates
+from .states import AdminStates, AstroStates, NumerologyStates, ProfileStates, TarotStates
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -124,6 +124,126 @@ def _limit_guard(session, user_id: int, lang: str) -> tuple[bool, str | None]:
     if remaining <= 0:
         return False, t("limit_reached", lang)
     return True, t("limit_info", lang, remaining=remaining)
+
+
+def _is_admin(user_id: int) -> bool:
+    return user_id in CONFIG.admin_ids
+
+
+def _admin_language(user_id: int) -> str:
+    with session_scope(CONFIG.database_url) as session:
+        user = session.exec(select(User).where(User.telegram_id == user_id)).first()
+        return get_language(user)
+
+
+def _build_admin_stats():
+    config = CONFIG
+    start_week, end_today = _date_range(7)
+    start_month, _ = _date_range(30)
+    with session_scope(config.database_url) as session:
+        total_users = session.exec(select(func.count()).select_from(User)).one()
+        new_users_week = session.exec(
+            select(func.count()).select_from(User).where(User.created_at >= start_week)
+        ).one()
+        total_spreads = session.exec(select(func.count()).select_from(SpreadHistory)).one()
+        start_day = datetime.combine(datetime.utcnow().date(), time.min)
+        end_day = start_day + timedelta(days=1)
+        today_spreads = session.exec(
+            select(func.count())
+            .select_from(SpreadHistory)
+            .where(SpreadHistory.created_at >= start_day)
+            .where(SpreadHistory.created_at < end_day)
+        ).one()
+        week_spreads = session.exec(
+            select(func.count())
+            .select_from(SpreadHistory)
+            .where(SpreadHistory.created_at >= start_week)
+            .where(SpreadHistory.created_at < end_today)
+        ).one()
+        month_spreads = session.exec(
+            select(func.count())
+            .select_from(SpreadHistory)
+            .where(SpreadHistory.created_at >= start_month)
+            .where(SpreadHistory.created_at < end_today)
+        ).one()
+        active_users_week = session.exec(
+            select(func.count(func.distinct(SpreadHistory.user_id)))
+            .where(SpreadHistory.created_at >= start_week)
+            .where(SpreadHistory.created_at < end_today)
+        ).one()
+        by_type = session.exec(
+            select(SpreadHistory.type, func.count()).group_by(SpreadHistory.type)
+        ).all()
+        by_spread = session.exec(
+            select(SpreadHistory.type, SpreadHistory.spread_name, func.count())
+            .group_by(SpreadHistory.type, SpreadHistory.spread_name)
+            .order_by(func.count().desc())
+            .limit(10)
+        ).all()
+        top_users = session.exec(
+            select(User.username, User.first_name, User.telegram_id, func.count())
+            .select_from(SpreadHistory)
+            .join(User, User.id == SpreadHistory.user_id)
+            .group_by(User.id)
+            .order_by(func.count().desc())
+            .limit(5)
+        ).all()
+        daily_activity = session.exec(
+            select(func.date(SpreadHistory.created_at), func.count())
+            .where(SpreadHistory.created_at >= start_week)
+            .where(SpreadHistory.created_at < end_today)
+            .group_by(func.date(SpreadHistory.created_at))
+            .order_by(func.date(SpreadHistory.created_at))
+        ).all()
+    type_lines = "\n".join(f"• {item[0]}: {item[1]}" for item in by_type) or "—"
+    spread_lines = (
+        "\n".join(
+            f"• {item[0]} / {item[1]}: {item[2]}" if item[1] else f"• {item[0]}: {item[2]}"
+            for item in by_spread
+        )
+        or "—"
+    )
+    user_lines = (
+        "\n".join(
+            f"• {('@' + username) if username else (first_name or 'User ' + str(telegram_id))}: {count}"
+            for username, first_name, telegram_id, count in top_users
+        )
+        or "—"
+    )
+    daily_lines = "\n".join(f"• {str(day)}: {count}" for day, count in daily_activity) or "—"
+    text = (
+        "📊 Статистика бота"\
+        f"\nПользователи: {total_users} (новых за 7 дней: {new_users_week})"\
+        f"\nАктивные за 7 дней: {active_users_week}"\
+        f"\nРаскладов всего: {total_spreads}"\
+        f"\nСегодня: {today_spreads} | 7 дней: {week_spreads} | 30 дней: {month_spreads}"\
+        f"\n\nПо типам:\n{type_lines}"\
+        f"\n\nТоп раскладов:\n{spread_lines}"\
+        f"\n\nТоп-5 пользователей:\n{user_lines}"\
+        f"\n\nАктивность за 7 дней:\n{daily_lines}"
+    )
+    charts = []
+    daily_chart = _build_daily_activity_chart(daily_activity)
+    if daily_chart:
+        charts.append((daily_chart, "Активность за 7 дней"))
+    type_chart = _build_type_distribution_chart(by_type)
+    if type_chart:
+        charts.append((type_chart, "Распределение по типам"))
+    return text, charts
+
+
+async def _send_broadcast(bot, text: str) -> int:
+    config = CONFIG
+    count = 0
+    with session_scope(config.database_url) as session:
+        users = session.exec(select(User)).all()
+        for user in users:
+            try:
+                await bot.send_message(user.telegram_id, text)
+                count += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("broadcast failed for %s: %s", user.telegram_id, exc)
+    return count
 
 
 def log_history(session, user_id: int, spread_type: str, spread_name: str, payload: dict | str, result: str) -> None:
@@ -651,136 +771,112 @@ async def back_to_menu(message: Message, state: FSMContext) -> None:
     await reset_to_menu(message, lang, state)
 
 
+@router.message(Command("admin"))
+async def admin_panel(message: Message, state: FSMContext) -> None:
+    if not _is_admin(message.from_user.id):
+        await message.answer(t("admin_denied", CONFIG.default_language))
+        logger.warning("admin_panel denied for %s", message.from_user.id)
+        return
+    with session_scope(CONFIG.database_url) as session:
+        user = ensure_user(session, message)
+        lang = get_language(user)
+    await state.clear()
+    await message.answer(t("admin_panel", lang), reply_markup=keyboards.admin_panel_keyboard(lang))
+
+
 @router.message(Command("admin_stats"))
 async def admin_stats(message: Message) -> None:
-    config = CONFIG
-    if message.from_user.id not in config.admin_ids:
-        await message.answer(t("admin_denied", config.default_language))
+    if not _is_admin(message.from_user.id):
+        await message.answer(t("admin_denied", CONFIG.default_language))
         logger.warning("admin_stats denied for %s", message.from_user.id)
         return
-    start_week, end_today = _date_range(7)
-    start_month, _ = _date_range(30)
-    with session_scope(config.database_url) as session:
-        total_users = session.exec(select(func.count()).select_from(User)).one()
-        new_users_week = session.exec(
-            select(func.count()).select_from(User).where(User.created_at >= start_week)
-        ).one()
-        total_spreads = session.exec(select(func.count()).select_from(SpreadHistory)).one()
-        start_day = datetime.combine(datetime.utcnow().date(), time.min)
-        end_day = start_day + timedelta(days=1)
-        today_spreads = session.exec(
-            select(func.count())
-            .select_from(SpreadHistory)
-            .where(SpreadHistory.created_at >= start_day)
-            .where(SpreadHistory.created_at < end_day)
-        ).one()
-        week_spreads = session.exec(
-            select(func.count())
-            .select_from(SpreadHistory)
-            .where(SpreadHistory.created_at >= start_week)
-            .where(SpreadHistory.created_at < end_today)
-        ).one()
-        month_spreads = session.exec(
-            select(func.count())
-            .select_from(SpreadHistory)
-            .where(SpreadHistory.created_at >= start_month)
-            .where(SpreadHistory.created_at < end_today)
-        ).one()
-        active_users_week = session.exec(
-            select(func.count(func.distinct(SpreadHistory.user_id)))
-            .where(SpreadHistory.created_at >= start_week)
-            .where(SpreadHistory.created_at < end_today)
-        ).one()
-        by_type = session.exec(
-            select(SpreadHistory.type, func.count()).group_by(SpreadHistory.type)
-        ).all()
-        by_spread = session.exec(
-            select(SpreadHistory.type, SpreadHistory.spread_name, func.count())
-            .group_by(SpreadHistory.type, SpreadHistory.spread_name)
-            .order_by(func.count().desc())
-            .limit(10)
-        ).all()
-        top_users = session.exec(
-            select(User.username, User.first_name, User.telegram_id, func.count())
-            .select_from(SpreadHistory)
-            .join(User, User.id == SpreadHistory.user_id)
-            .group_by(User.id)
-            .order_by(func.count().desc())
-            .limit(5)
-        ).all()
-        daily_activity = session.exec(
-            select(func.date(SpreadHistory.created_at), func.count())
-            .where(SpreadHistory.created_at >= start_week)
-            .where(SpreadHistory.created_at < end_today)
-            .group_by(func.date(SpreadHistory.created_at))
-            .order_by(func.date(SpreadHistory.created_at))
-        ).all()
-        type_lines = "\n".join(f"• {item[0]}: {item[1]}" for item in by_type) or "—"
-        spread_lines = (
-            "\n".join(
-                f"• {item[0]} / {item[1]}: {item[2]}" if item[1] else f"• {item[0]}: {item[2]}"
-                for item in by_spread
-            )
-            or "—"
+    text, charts = _build_admin_stats()
+    await message.answer(text)
+    for buffer, caption in charts:
+        await message.answer_photo(
+            BufferedInputFile(buffer.getvalue(), filename=f"{caption}.png"),
+            caption=caption,
         )
-        user_lines = (
-            "\n".join(
-                f"• {('@' + username) if username else (first_name or 'User ' + str(telegram_id))}: {count}"
-                for username, first_name, telegram_id, count in top_users
-            )
-            or "—"
+
+
+@router.callback_query(F.data == "admin_stats")
+async def admin_stats_callback(call: CallbackQuery) -> None:
+    await call.answer()
+    if not _is_admin(call.from_user.id):
+        await call.message.answer(t("admin_denied", CONFIG.default_language))
+        logger.warning("admin_stats denied for %s", call.from_user.id)
+        return
+    text, charts = _build_admin_stats()
+    await call.message.answer(text)
+    for buffer, caption in charts:
+        await call.message.answer_photo(
+            BufferedInputFile(buffer.getvalue(), filename=f"{caption}.png"),
+            caption=caption,
         )
-        daily_lines = (
-            "\n".join(f"• {str(day)}: {count}" for day, count in daily_activity) or "—"
-        )
-        text = (
-            "📊 Статистика бота"\
-            f"\nПользователи: {total_users} (новых за 7 дней: {new_users_week})"\
-            f"\nАктивные за 7 дней: {active_users_week}"\
-            f"\nРаскладов всего: {total_spreads}"\
-            f"\nСегодня: {today_spreads} | 7 дней: {week_spreads} | 30 дней: {month_spreads}"\
-            f"\n\nПо типам:\n{type_lines}"\
-            f"\n\nТоп раскладов:\n{spread_lines}"\
-            f"\n\nТоп-5 пользователей:\n{user_lines}"\
-            f"\n\nАктивность за 7 дней:\n{daily_lines}"
-        )
-        await message.answer(text)
-        charts = []
-        daily_chart = _build_daily_activity_chart(daily_activity)
-        if daily_chart:
-            charts.append((daily_chart, "Активность за 7 дней"))
-        type_chart = _build_type_distribution_chart(by_type)
-        if type_chart:
-            charts.append((type_chart, "Распределение по типам"))
-        for buffer, caption in charts:
-            await message.answer_photo(
-                BufferedInputFile(buffer.getvalue(), filename=f"{caption}.png"),
-                caption=caption,
-            )
+
+
+@router.callback_query(F.data == "admin_broadcast")
+async def admin_broadcast_menu(call: CallbackQuery, state: FSMContext) -> None:
+    await call.answer()
+    if not _is_admin(call.from_user.id):
+        await call.message.answer(t("admin_denied", CONFIG.default_language))
+        logger.warning("broadcast denied for %s", call.from_user.id)
+        return
+    lang = _admin_language(call.from_user.id)
+    await state.set_state(AdminStates.waiting_for_broadcast_text)
+    await call.message.answer(t("admin_broadcast_prompt", lang))
 
 
 @router.message(Command("broadcast"))
-async def admin_broadcast(message: Message) -> None:
-    config = CONFIG
-    if message.from_user.id not in config.admin_ids:
-        await message.answer(t("admin_denied", config.default_language))
+async def admin_broadcast_command(message: Message, state: FSMContext) -> None:
+    if not _is_admin(message.from_user.id):
+        await message.answer(t("admin_denied", CONFIG.default_language))
         logger.warning("broadcast denied for %s", message.from_user.id)
         return
+    lang = _admin_language(message.from_user.id)
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
-        await message.answer(t("broadcast_usage", config.default_language))
+        await state.set_state(AdminStates.waiting_for_broadcast_text)
+        await message.answer(t("admin_broadcast_prompt", lang))
         return
-    text = parts[1]
-    count = 0
-    with session_scope(config.database_url) as session:
-        users = session.exec(select(User)).all()
-        for user in users:
-            try:
-                await message.bot.send_message(user.telegram_id, text)
-                count += 1
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("broadcast failed for %s: %s", user.telegram_id, exc)
-    await message.answer(t("broadcast_ack", config.default_language, count=count))
+    count = await _send_broadcast(message.bot, parts[1])
+    await message.answer(t("broadcast_ack", lang, count=count), reply_markup=keyboards.admin_panel_keyboard(lang))
+
+
+@router.message(AdminStates.waiting_for_broadcast_text, F.text.lower().in_({"отмена", "cancel"}))
+async def admin_broadcast_cancel(message: Message, state: FSMContext) -> None:
+    if not _is_admin(message.from_user.id):
+        await message.answer(t("admin_denied", CONFIG.default_language))
+        logger.warning("broadcast denied for %s", message.from_user.id)
+        return
+    lang = _admin_language(message.from_user.id)
+    await state.clear()
+    await message.answer(t("admin_broadcast_cancel", lang), reply_markup=keyboards.admin_panel_keyboard(lang))
+
+
+@router.message(AdminStates.waiting_for_broadcast_text)
+async def admin_broadcast(message: Message, state: FSMContext) -> None:
+    if not _is_admin(message.from_user.id):
+        await message.answer(t("admin_denied", CONFIG.default_language))
+        logger.warning("broadcast denied for %s", message.from_user.id)
+        return
+    text = message.text
+    lang = _admin_language(message.from_user.id)
+    count = await _send_broadcast(message.bot, text)
+    await state.clear()
+    await message.answer(t("broadcast_ack", lang, count=count), reply_markup=keyboards.admin_panel_keyboard(lang))
+
+
+@router.callback_query(F.data == "admin_back")
+async def admin_back(call: CallbackQuery, state: FSMContext) -> None:
+    await call.answer()
+    if not _is_admin(call.from_user.id):
+        await call.message.answer(t("admin_denied", CONFIG.default_language))
+        logger.warning("admin_back denied for %s", call.from_user.id)
+        return
+    lang = _admin_language(call.from_user.id)
+    await state.clear()
+    await call.message.answer(t("menu", lang), reply_markup=main_menu_markup(lang))
 
 
 @router.callback_query(F.data == "another")
