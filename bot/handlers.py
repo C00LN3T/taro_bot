@@ -29,6 +29,7 @@ from .services.referrals import apply_referral
 from .services.settings import (
     REF_BONUS_KEY,
     REF_ENABLED_KEY,
+    REF_WELCOME_BONUS_KEY,
     get_bot_settings,
     get_referral_settings,
     set_response_delay,
@@ -78,6 +79,48 @@ def ensure_user(session, message: Message) -> User:
 
 def main_menu_markup(lang: str):
     return keyboards.main_menu_keyboard(lang)
+
+
+def _user_display_name(user: User | Message) -> str:
+    username = None
+    first_name = None
+    telegram_id = None
+    if isinstance(user, User):
+        username = user.username
+        first_name = user.first_name
+        telegram_id = user.telegram_id
+    else:
+        username = user.from_user.username
+        first_name = user.from_user.first_name
+        telegram_id = user.from_user.id
+    if username:
+        return f"@{username}"
+    if first_name:
+        return first_name
+    return str(telegram_id)
+
+
+def _referral_status_text(enabled: bool, lang: str) -> str:
+    if lang == "ru":
+        return "включена" if enabled else "выключена"
+    return "enabled" if enabled else "disabled"
+
+
+def _referral_settings_payload(settings, lang: str):
+    text = t(
+        "referral_settings_panel",
+        lang,
+        bonus=settings.bonus,
+        welcome_bonus=settings.welcome_bonus,
+        status=_referral_status_text(settings.enabled, lang),
+    )
+    markup = keyboards.admin_referral_keyboard(
+        bonus=settings.bonus,
+        welcome_bonus=settings.welcome_bonus,
+        enabled=settings.enabled,
+        lang=lang,
+    )
+    return text, markup
 
 
 def actions_keyboard(lang: str, share_payload: str | None = None):
@@ -312,14 +355,29 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.set_state(ProfileStates.waiting_for_language)
     await message.answer(t("welcome", lang), reply_markup=main_menu_markup(lang))
     if referral_result.bonus_applied and referral_result.inviter:
-        await message.answer(t("referral_welcome", lang, bonus=referral_settings.bonus))
+        inviter_label = _user_display_name(referral_result.inviter)
+        if referral_result.welcome_bonus_applied:
+            await message.answer(
+                t(
+                    "referral_welcome_with_bonus",
+                    lang,
+                    inviter=inviter_label,
+                    bonus=referral_settings.welcome_bonus,
+                )
+            )
+        else:
+            await message.answer(
+                t("referral_welcome_no_bonus", lang, inviter=inviter_label)
+            )
         inviter_lang = get_language(referral_result.inviter)
+        invited_name = _user_display_name(message)
         await message.bot.send_message(
             referral_result.inviter.telegram_id,
             t(
                 "referral_notif_inviter",
                 inviter_lang,
                 bonus=referral_settings.bonus,
+                invited=invited_name,
                 balance=referral_result.inviter.free_spreads,
             ),
         )
@@ -346,7 +404,15 @@ async def cmd_invite(message: Message) -> None:
         return
     bot_info = await message.bot.get_me()
     link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
-    await message.answer(t("invite_link", lang, link=link, bonus=referral_settings.bonus))
+    await message.answer(
+        t(
+            "invite_link",
+            lang,
+            link=link,
+            bonus=referral_settings.bonus,
+            welcome_bonus=referral_settings.welcome_bonus,
+        )
+    )
 
 
 @router.message(Command("referrals"))
@@ -763,6 +829,30 @@ async def admin_set_ref_bonus(message: Message) -> None:
     await message.answer(t("referral_bonus_updated", lang, bonus=bonus_value))
 
 
+@router.message(Command("set_ref_welcome"))
+async def admin_set_ref_welcome(message: Message) -> None:
+    if not _is_admin(message.from_user.id):
+        await message.answer(t("admin_denied", CONFIG.default_language))
+        logger.warning("set_ref_welcome denied for %s", message.from_user.id)
+        return
+    lang = _admin_language(message.from_user.id)
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer(t("referral_welcome_usage", lang))
+        return
+    try:
+        bonus_value = int(parts[1])
+    except ValueError:
+        await message.answer(t("referral_welcome_usage", lang))
+        return
+    if bonus_value < 0:
+        await message.answer(t("referral_welcome_usage", lang))
+        return
+    with session_scope(CONFIG.database_url) as session:
+        set_setting(session, REF_WELCOME_BONUS_KEY, bonus_value)
+    await message.answer(t("referral_welcome_bonus_updated", lang, bonus=bonus_value))
+
+
 @router.message(Command("ref_enable"))
 async def admin_ref_enable(message: Message) -> None:
     if not _is_admin(message.from_user.id):
@@ -821,6 +911,19 @@ async def admin_ref_stats(message: Message) -> None:
             leaders=leaders_text,
         )
     )
+
+
+@router.message(Command("ref_settings"))
+async def admin_referral_settings_cmd(message: Message) -> None:
+    if not _is_admin(message.from_user.id):
+        await message.answer(t("admin_denied", CONFIG.default_language))
+        logger.warning("ref_settings denied for %s", message.from_user.id)
+        return
+    lang = _admin_language(message.from_user.id)
+    with session_scope(CONFIG.database_url) as session:
+        settings = get_referral_settings(session)
+    text, markup = _referral_settings_payload(settings, lang)
+    await message.answer(text, reply_markup=markup)
 
 
 @router.message(Command("admin"))
@@ -953,6 +1056,62 @@ async def admin_back(call: CallbackQuery, state: FSMContext) -> None:
     lang = _admin_language(call.from_user.id)
     await state.clear()
     await call.message.answer(t("menu", lang), reply_markup=main_menu_markup(lang))
+
+
+@router.callback_query(F.data == "admin_referral_settings")
+async def admin_referral_settings_callback(call: CallbackQuery) -> None:
+    await call.answer()
+    if not _is_admin(call.from_user.id):
+        await call.message.answer(t("admin_denied", CONFIG.default_language))
+        logger.warning("ref_settings denied for %s", call.from_user.id)
+        return
+    lang = _admin_language(call.from_user.id)
+    with session_scope(CONFIG.database_url) as session:
+        settings = get_referral_settings(session)
+    text, markup = _referral_settings_payload(settings, lang)
+    await call.message.edit_text(text, reply_markup=markup)
+
+
+def _apply_referral_setting_change(delta_bonus: int = 0, delta_welcome: int = 0, toggle: bool | None = None):
+    def handler(call: CallbackQuery):
+        lang = _admin_language(call.from_user.id)
+        with session_scope(CONFIG.database_url) as session:
+            settings = get_referral_settings(session)
+            new_bonus = max(0, settings.bonus + delta_bonus)
+            new_welcome = max(0, settings.welcome_bonus + delta_welcome)
+            enabled = settings.enabled if toggle is None else not settings.enabled
+            if delta_bonus != 0:
+                set_setting(session, REF_BONUS_KEY, new_bonus)
+            if delta_welcome != 0:
+                set_setting(session, REF_WELCOME_BONUS_KEY, new_welcome)
+            if toggle is not None:
+                set_setting(session, REF_ENABLED_KEY, enabled)
+            updated = get_referral_settings(session)
+        text, markup = _referral_settings_payload(updated, lang)
+        return text, markup
+
+    return handler
+
+
+def _register_referral_setting_callback(data_value: str, delta_bonus=0, delta_welcome=0, toggle: bool | None = None):
+    @router.callback_query(F.data == data_value)
+    async def callback(call: CallbackQuery) -> None:
+        await call.answer()
+        if not _is_admin(call.from_user.id):
+            await call.message.answer(t("admin_denied", CONFIG.default_language))
+            logger.warning("%s denied for %s", data_value, call.from_user.id)
+            return
+        text, markup = _apply_referral_setting_change(delta_bonus, delta_welcome, toggle)(call)
+        await call.message.edit_text(text, reply_markup=markup)
+
+
+_register_referral_setting_callback("ref_bonus_inc", delta_bonus=1)
+_register_referral_setting_callback("ref_bonus_dec", delta_bonus=-1)
+_register_referral_setting_callback("ref_bonus_show")
+_register_referral_setting_callback("ref_welcome_inc", delta_welcome=1)
+_register_referral_setting_callback("ref_welcome_dec", delta_welcome=-1)
+_register_referral_setting_callback("ref_welcome_show")
+_register_referral_setting_callback("ref_toggle", toggle=True)
 
 
 @router.callback_query(F.data == "another")
