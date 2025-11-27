@@ -49,17 +49,17 @@ MODALITIES = {
 
 def zodiac_for_date(session: Session, target: date) -> ZodiacSign | None:
     signs = session.exec(select(ZodiacSign)).all()
+    target_pair = (target.month, target.day)
     for sign in signs:
         start_month, start_day = map(int, sign.date_start.split("-"))
         end_month, end_day = map(int, sign.date_end.split("-"))
-        start = date(target.year, start_month, start_day)
-        end = date(target.year, end_month, end_day)
+        start_pair = (start_month, start_day)
+        end_pair = (end_month, end_day)
 
         if start_month > end_month:  # spans new year
-            end = date(target.year + 1, end_month, end_day)
-            if target >= start or target <= end:
+            if target_pair >= start_pair or target_pair <= end_pair:
                 return sign
-        elif start <= target <= end:
+        elif start_pair <= target_pair <= end_pair:
             return sign
     return None
 

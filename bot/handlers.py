@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, time, timedelta
@@ -18,12 +19,20 @@ from .db import get_or_create_user, session_scope
 from .localization import BUTTONS, button_text, t
 from .models import SpreadHistory, User
 from .services import astrology, extra, numerology, tarot
+from .services.settings import get_bot_settings, set_response_delay
 from .states import AstroStates, NumerologyStates, ProfileStates, TarotStates
 
 router = Router()
 logger = logging.getLogger(__name__)
 
 CONFIG = BotConfig.load()
+
+
+async def maybe_delay_response(session) -> None:
+    settings = get_bot_settings(session)
+    delay = max(settings.response_delay_seconds, 0)
+    if delay:
+        await asyncio.sleep(delay)
 
 
 def parse_birthdate(text: str) -> datetime | None:
@@ -330,6 +339,7 @@ async def tarot_choose_spread(message: Message, state: FSMContext) -> None:
             return
         result = func_map[0](session)
         tarot.save_history(session, user.id, "tarot", func_map[1], json.dumps({}), result)
+        await maybe_delay_response(session)
         await message.answer(result, reply_markup=actions_keyboard(lang, share_payload=result))
         await message.answer(note)
     await state.clear()
@@ -379,6 +389,7 @@ async def random_spread(message: Message, state: FSMContext) -> None:
             text = extra.metaphor_of_the_day()
             result = t("metaphor", lang, text=text)
             log_history(session, user.id, "metaphor", "metaphor_day", {}, result)
+        await maybe_delay_response(session)
         await message.answer(t("random_result", lang, system=system, result=result), reply_markup=actions_keyboard(lang, share_payload=result))
         await message.answer(note)
 
@@ -395,6 +406,7 @@ async def rune_day(message: Message, state: FSMContext) -> None:
         name, meaning = extra.rune_of_the_day()
         result = t("rune", lang, name=name, meaning=meaning)
         log_history(session, user.id, "rune", name, {}, result)
+        await maybe_delay_response(session)
         await message.answer(result, reply_markup=actions_keyboard(lang, share_payload=result))
         await message.answer(note)
 
@@ -411,6 +423,7 @@ async def metaphor_day(message: Message, state: FSMContext) -> None:
         text_value = extra.metaphor_of_the_day()
         result = t("metaphor", lang, text=text_value)
         log_history(session, user.id, "metaphor", "metaphor_day", {}, result)
+        await maybe_delay_response(session)
         await message.answer(result, reply_markup=actions_keyboard(lang, share_payload=result))
         await message.answer(note)
 
@@ -494,6 +507,7 @@ async def numerology_birthdate(message: Message, state: FSMContext) -> None:
                 text_lines.append(f"{item.title}: {item.number} — {item.description}")
             payload = json.dumps({"name": name, "birthdate": parsed.date().isoformat()})
             numerology.save_history(session, user.id, payload, "\n".join(text_lines))
+            await maybe_delay_response(session)
             await message.answer("\n".join(text_lines), reply_markup=actions_keyboard(lang, share_payload="\n".join(text_lines)))
             await message.answer(note)
             await state.clear()
@@ -510,6 +524,7 @@ async def numerology_birthdate(message: Message, state: FSMContext) -> None:
             session.add(profile_user)
             session.commit()
         numerology.save_history(session, user.id, json.dumps({"birthdate": parsed.date().isoformat()}), f"{result.title}: {result.number}\n{result.description}")
+        await maybe_delay_response(session)
         await message.answer(f"{result.title}: {result.number}\n{result.description}", reply_markup=actions_keyboard(lang, share_payload=f"{result.title}: {result.number}"))
         await message.answer(note)
     await state.clear()
@@ -532,6 +547,7 @@ async def numerology_second_birthdate(message: Message, state: FSMContext) -> No
             f"Первый: {compat.first_number}, Второй: {compat.second_number}\n{compat.description}"
         )
         numerology.save_history(session, user.id, json.dumps({"first": first.date().isoformat(), "second": parsed.date().isoformat()}), text)
+        await maybe_delay_response(session)
         await message.answer(text, reply_markup=actions_keyboard(lang, share_payload=text))
     await state.clear()
 
@@ -555,6 +571,7 @@ async def numerology_name(message: Message, state: FSMContext) -> None:
             return
         result = numerology.name_number(session, name)
         numerology.save_history(session, user.id, json.dumps({"name": name}), f"{result.title}: {result.number}\n{result.description}")
+        await maybe_delay_response(session)
         await message.answer(f"{result.title}: {result.number}\n{result.description}", reply_markup=actions_keyboard(lang, share_payload=f"{result.title}: {result.number}"))
         await message.answer(note)
     await state.clear()
@@ -594,6 +611,7 @@ async def astro_birthdate(message: Message, state: FSMContext) -> None:
             return
         text = astrology.short_portrait(sign)
         astrology.save_history(session, user.id, sign, text)
+        await maybe_delay_response(session)
         await message.answer(text, reply_markup=actions_keyboard(lang, share_payload=text))
         await message.answer(note)
 
@@ -706,6 +724,30 @@ async def admin_stats(message: Message) -> None:
             f"\n\nАктивность за 7 дней:\n{daily_lines}"
         )
         await message.answer(text)
+
+
+@router.message(Command("set_delay"))
+async def admin_set_delay(message: Message) -> None:
+    config = CONFIG
+    if message.from_user.id not in config.admin_ids:
+        await message.answer(t("admin_denied", config.default_language))
+        logger.warning("set_delay denied for %s", message.from_user.id)
+        return
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer(t("delay_usage", config.default_language))
+        return
+    try:
+        delay_seconds = int(parts[1])
+    except ValueError:
+        await message.answer(t("delay_invalid", config.default_language))
+        return
+    if delay_seconds < 0:
+        await message.answer(t("delay_invalid", config.default_language))
+        return
+    with session_scope(config.database_url) as session:
+        settings = set_response_delay(session, delay_seconds)
+    await message.answer(t("delay_updated", config.default_language, seconds=settings.response_delay_seconds))
 
 
 @router.message(Command("broadcast"))
