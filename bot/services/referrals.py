@@ -48,6 +48,7 @@ def apply_referral(
         return ReferralResult(inviter=None, bonus_applied=False)
 
     new_user.referred_by = inviter_id
+    new_user.free_spreads += settings.bonus
     session.add(new_user)
     session.add(
         Referral(inviter_id=inviter_id, invited_id=new_user.id, created_at=datetime.utcnow())
