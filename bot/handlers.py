@@ -3,12 +3,16 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, time, timedelta
+from io import BytesIO
 from typing import Any
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from sqlalchemy import func
 from sqlmodel import delete, select
 
@@ -64,6 +68,41 @@ def _date_range(days: int) -> tuple[datetime, datetime]:
     start = datetime.combine(datetime.utcnow().date() - timedelta(days=days - 1), time.min)
     end = datetime.combine(datetime.utcnow().date() + timedelta(days=1), time.min)
     return start, end
+
+
+def _figure_to_bytes(fig) -> BytesIO:
+    buffer = BytesIO()
+    fig.savefig(buffer, format="png", bbox_inches="tight")
+    buffer.seek(0)
+    plt.close(fig)
+    return buffer
+
+
+def _build_daily_activity_chart(daily_activity: list[tuple[datetime, int]]):
+    if not daily_activity:
+        return None
+    dates = [datetime.fromisoformat(str(day)).strftime("%d.%m") for day, _ in daily_activity]
+    counts = [count for _, count in daily_activity]
+    fig, ax = plt.subplots(figsize=(6, 3))
+    ax.bar(dates, counts, color="#6A5ACD")
+    ax.set_title("Активность за 7 дней")
+    ax.set_ylabel("Количество раскладов")
+    ax.set_xlabel("Дата")
+    ax.tick_params(axis="x", rotation=45, labelsize=8)
+    fig.tight_layout()
+    return _figure_to_bytes(fig)
+
+
+def _build_type_distribution_chart(by_type: list[tuple[str, int]]):
+    if not by_type:
+        return None
+    labels = [item[0] or "Не указан" for item in by_type]
+    counts = [item[1] for item in by_type]
+    fig, ax = plt.subplots(figsize=(4.5, 4.5))
+    ax.pie(counts, labels=labels, autopct="%1.0f%%", startangle=140)
+    ax.axis("equal")
+    ax.set_title("Распределение по типам")
+    return _figure_to_bytes(fig)
 
 
 def _remaining_limit(session, user_id: int) -> tuple[int, int]:
@@ -706,6 +745,18 @@ async def admin_stats(message: Message) -> None:
             f"\n\nАктивность за 7 дней:\n{daily_lines}"
         )
         await message.answer(text)
+        charts = []
+        daily_chart = _build_daily_activity_chart(daily_activity)
+        if daily_chart:
+            charts.append((daily_chart, "Активность за 7 дней"))
+        type_chart = _build_type_distribution_chart(by_type)
+        if type_chart:
+            charts.append((type_chart, "Распределение по типам"))
+        for buffer, caption in charts:
+            await message.answer_photo(
+                BufferedInputFile(buffer.getvalue(), filename=f"{caption}.png"),
+                caption=caption,
+            )
 
 
 @router.message(Command("broadcast"))
