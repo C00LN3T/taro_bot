@@ -6,6 +6,7 @@ from typing import Iterable, NamedTuple
 from sqlmodel import Session, select
 
 from ..models import SpreadHistory, TarotCard
+from .history import save_spread
 
 
 class TarotCardView(NamedTuple):
@@ -100,13 +101,21 @@ SPREAD_FUNCS = {
 }
 
 
-def save_history(session: Session, user_id: int, spread_type: str, spread_name: str, input_payload: str, result: str) -> None:
-    history = SpreadHistory(
+def save_history(
+    session: Session,
+    user_id: int,
+    spread_type: str,
+    spread_name: str,
+    input_payload: str,
+    result: str,
+    daily_limit: int | None = None,
+) -> None:
+    save_spread(
+        session,
         user_id=user_id,
-        type=spread_type,
+        spread_type=spread_type,
         spread_name=spread_name,
         input_data=input_payload,
         result=result,
+        daily_limit=daily_limit,
     )
-    session.add(history)
-    session.commit()

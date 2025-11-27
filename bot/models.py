@@ -6,11 +6,6 @@ from typing import Optional
 from sqlmodel import Field, SQLModel
 
 
-class BotSettings(SQLModel, table=True):
-    id: Optional[int] = Field(default=1, primary_key=True)
-    response_delay_seconds: int = 0
-
-
 class User(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     telegram_id: int = Field(index=True, unique=True)
@@ -20,6 +15,8 @@ class User(SQLModel, table=True):
     birth_date: Optional[date] = None
     gender: Optional[str] = None
     language: str = "ru"
+    referred_by: Optional[int] = Field(default=None, foreign_key="user.id")
+    free_spreads: int = Field(default=0)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -65,3 +62,19 @@ class SessionState(SQLModel, table=True):
     current_state: str
     payload: str
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Referral(SQLModel, table=True):
+    inviter_id: int = Field(foreign_key="user.id", primary_key=True)
+    invited_id: int = Field(foreign_key="user.id", primary_key=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Setting(SQLModel, table=True):
+    key: str = Field(primary_key=True)
+    value: str
+
+
+class BotSettings(SQLModel, table=True):
+    id: Optional[int] = Field(default=1, primary_key=True)
+    response_delay_seconds: int = 0

@@ -21,10 +21,19 @@ from . import keyboards
 from .config import BotConfig
 from .db import get_or_create_user, session_scope
 from .localization import BUTTONS, button_text, t
-from .models import SpreadHistory, User
+from .models import Referral, SpreadHistory, User
 from .services import astrology, extra, numerology, tarot
+from .services.history import daily_usage_count, save_spread
+from .services.referrals import apply_referral
+from .services.settings import (
+    REF_BONUS_KEY,
+    REF_ENABLED_KEY,
+    get_bot_settings,
+    get_referral_settings,
+    set_response_delay,
+    set_setting,
+)
 from .states import AdminStates, AstroStates, NumerologyStates, ProfileStates, TarotStates
-from .services.settings import get_bot_settings, set_response_delay
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -119,23 +128,17 @@ def _build_type_distribution_chart(by_type: list[tuple[str, int]]):
     return _figure_to_bytes(fig)
 
 
-def _remaining_limit(session, user_id: int) -> tuple[int, int]:
-    start_day = datetime.combine(datetime.utcnow().date(), time.min)
-    end_day = start_day + timedelta(days=1)
-    count = session.exec(
-        select(func.count())
-        .select_from(SpreadHistory)
-        .where(SpreadHistory.user_id == user_id)
-        .where(SpreadHistory.created_at >= start_day)
-        .where(SpreadHistory.created_at < end_day)
-    ).one()
-    remaining = max(CONFIG.daily_free_limit - count, 0)
-    return remaining, count
+def _remaining_limit(session, user_id: int) -> tuple[int, int, int]:
+    count = daily_usage_count(session, user_id)
+    user = session.get(User, user_id)
+    free_spreads = user.free_spreads if user else 0
+    remaining = max(CONFIG.daily_free_limit - count, 0) + free_spreads
+    return remaining, count, free_spreads
 
 
 def _limit_guard(session, user_id: int, lang: str) -> tuple[bool, str | None]:
-    remaining, _ = _remaining_limit(session, user_id)
-    if remaining <= 0:
+    remaining, count, free_spreads = _remaining_limit(session, user_id)
+    if count >= CONFIG.daily_free_limit and free_spreads <= 0:
         return False, t("limit_reached", lang)
     return True, t("limit_info", lang, remaining=remaining)
 
@@ -246,6 +249,13 @@ def _build_admin_stats():
     return text, charts
 
 
+def _extract_start_payload(message: Message) -> str | None:
+    if not message.text:
+        return None
+    parts = message.text.split(maxsplit=1)
+    return parts[1] if len(parts) > 1 else None
+
+
 async def _send_broadcast(bot, text: str) -> int:
     config = CONFIG
     count = 0
@@ -261,16 +271,15 @@ async def _send_broadcast(bot, text: str) -> int:
 
 
 def log_history(session, user_id: int, spread_type: str, spread_name: str, payload: dict | str, result: str) -> None:
-    session.add(
-        SpreadHistory(
-            user_id=user_id,
-            type=spread_type,
-            spread_name=spread_name,
-            input_data=json.dumps(payload) if not isinstance(payload, str) else payload,
-            result=result,
-        )
+    save_spread(
+        session,
+        user_id,
+        spread_type,
+        spread_name,
+        json.dumps(payload) if not isinstance(payload, str) else payload,
+        result,
+        daily_limit=CONFIG.daily_free_limit,
     )
-    session.commit()
 
 
 def reset_to_menu(message: Message, lang: str, state: FSMContext, text: str | None = None) -> Any:
@@ -280,17 +289,34 @@ def reset_to_menu(message: Message, lang: str, state: FSMContext, text: str | No
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.clear()
+    start_payload = _extract_start_payload(message)
     with session_scope(CONFIG.database_url) as session:
-        user = get_or_create_user(
+        existing_user = session.exec(select(User).where(User.telegram_id == message.from_user.id)).first()
+        is_new = existing_user is None
+        user = existing_user or get_or_create_user(
             session,
             telegram_id=message.from_user.id,
             language=CONFIG.default_language,
             username=message.from_user.username,
             first_name=message.from_user.first_name,
         )
+        referral_settings = get_referral_settings(session)
+        referral_result = apply_referral(session, user, start_payload, referral_settings, is_new)
         lang = get_language(user)
     await state.set_state(ProfileStates.waiting_for_language)
     await message.answer(t("welcome", lang), reply_markup=main_menu_markup(lang))
+    if referral_result.bonus_applied and referral_result.inviter:
+        await message.answer(t("referral_welcome", lang, bonus=referral_settings.bonus))
+        inviter_lang = get_language(referral_result.inviter)
+        await message.bot.send_message(
+            referral_result.inviter.telegram_id,
+            t(
+                "referral_notif_inviter",
+                inviter_lang,
+                bonus=referral_settings.bonus,
+                balance=referral_result.inviter.free_spreads,
+            ),
+        )
     await message.answer(t("ask_language", lang))
 
 
@@ -300,6 +326,32 @@ async def cmd_help(message: Message) -> None:
         user = ensure_user(session, message)
         lang = get_language(user)
     await message.answer(t("help", lang), reply_markup=main_menu_markup(lang))
+
+
+@router.message(Command("invite"))
+async def cmd_invite(message: Message) -> None:
+    with session_scope(CONFIG.database_url) as session:
+        user = ensure_user(session, message)
+        lang = get_language(user)
+        referral_settings = get_referral_settings(session)
+    if not referral_settings.enabled:
+        await message.answer(t("invite_disabled", lang))
+        return
+    bot_info = await message.bot.get_me()
+    link = f"https://t.me/{bot_info.username}?start=ref_{user.id}"
+    await message.answer(t("invite_link", lang, link=link, bonus=referral_settings.bonus))
+
+
+@router.message(Command("referrals"))
+async def cmd_referrals(message: Message) -> None:
+    with session_scope(CONFIG.database_url) as session:
+        user = ensure_user(session, message)
+        lang = get_language(user)
+        invited_count = session.exec(
+            select(func.count()).select_from(Referral).where(Referral.inviter_id == user.id)
+        ).one()
+        balance = user.free_spreads
+    await message.answer(t("referral_stats_user", lang, count=invited_count, balance=balance))
 
 
 @router.message(Command("menu"))
@@ -407,6 +459,16 @@ async def profile_button(message: Message) -> None:
     await cmd_profile(message)
 
 
+@router.message(F.text.in_({button_text("invite", "ru"), button_text("invite", "en")}))
+async def invite_button(message: Message) -> None:
+    await cmd_invite(message)
+
+
+@router.message(F.text.in_({button_text("referrals", "ru"), button_text("referrals", "en")}))
+async def referrals_button(message: Message) -> None:
+    await cmd_referrals(message)
+
+
 @router.message(F.text.in_({button_text("change_name", "ru"), button_text("change_name", "en")}))
 async def profile_change_name(message: Message, state: FSMContext) -> None:
     with session_scope(CONFIG.database_url) as session:
@@ -502,7 +564,15 @@ async def tarot_choose_spread(message: Message, state: FSMContext) -> None:
             await message.answer(t("tarot_prompt", lang))
             return
         result = func_map[0](session)
-        tarot.save_history(session, user.id, "tarot", func_map[1], json.dumps({}), result)
+        tarot.save_history(
+            session,
+            user.id,
+            "tarot",
+            func_map[1],
+            json.dumps({}),
+            result,
+            daily_limit=CONFIG.daily_free_limit,
+        )
         await maybe_delay_response(session)
         await message.answer(result, reply_markup=actions_keyboard(lang, share_payload=result))
         await message.answer(note)
@@ -660,6 +730,90 @@ async def back_to_menu(message: Message, state: FSMContext) -> None:
         user = ensure_user(session, message)
         lang = get_language(user)
     await reset_to_menu(message, lang, state)
+
+
+@router.message(Command("set_ref_bonus"))
+async def admin_set_ref_bonus(message: Message) -> None:
+    if not _is_admin(message.from_user.id):
+        await message.answer(t("admin_denied", CONFIG.default_language))
+        logger.warning("set_ref_bonus denied for %s", message.from_user.id)
+        return
+    lang = _admin_language(message.from_user.id)
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer(t("referral_bonus_usage", lang))
+        return
+    try:
+        bonus_value = int(parts[1])
+    except ValueError:
+        await message.answer(t("referral_bonus_usage", lang))
+        return
+    if bonus_value < 0:
+        await message.answer(t("referral_bonus_usage", lang))
+        return
+    with session_scope(CONFIG.database_url) as session:
+        set_setting(session, REF_BONUS_KEY, bonus_value)
+    await message.answer(t("referral_bonus_updated", lang, bonus=bonus_value))
+
+
+@router.message(Command("ref_enable"))
+async def admin_ref_enable(message: Message) -> None:
+    if not _is_admin(message.from_user.id):
+        await message.answer(t("admin_denied", CONFIG.default_language))
+        logger.warning("ref_enable denied for %s", message.from_user.id)
+        return
+    lang = _admin_language(message.from_user.id)
+    with session_scope(CONFIG.database_url) as session:
+        set_setting(session, REF_ENABLED_KEY, True)
+    await message.answer(t("referral_system_enabled", lang))
+
+
+@router.message(Command("ref_disable"))
+async def admin_ref_disable(message: Message) -> None:
+    if not _is_admin(message.from_user.id):
+        await message.answer(t("admin_denied", CONFIG.default_language))
+        logger.warning("ref_disable denied for %s", message.from_user.id)
+        return
+    lang = _admin_language(message.from_user.id)
+    with session_scope(CONFIG.database_url) as session:
+        set_setting(session, REF_ENABLED_KEY, False)
+    await message.answer(t("referral_system_disabled", lang))
+
+
+@router.message(Command("ref_stats"))
+async def admin_ref_stats(message: Message) -> None:
+    if not _is_admin(message.from_user.id):
+        await message.answer(t("admin_denied", CONFIG.default_language))
+        logger.warning("ref_stats denied for %s", message.from_user.id)
+        return
+    lang = _admin_language(message.from_user.id)
+    with session_scope(CONFIG.database_url) as session:
+        total = session.exec(select(func.count()).select_from(Referral)).one()
+        leaders = session.exec(
+            select(User.username, User.first_name, User.telegram_id, func.count().label("cnt"))
+            .select_from(Referral)
+            .join(User, User.id == Referral.inviter_id)
+            .group_by(User.id)
+            .order_by(func.count().desc())
+            .limit(10)
+        ).all()
+        settings = get_referral_settings(session)
+    leaders_text = (
+        "\n".join(
+            f"• {('@' + username) if username else (first_name or 'User ' + str(telegram_id))}: {count}"
+            for username, first_name, telegram_id, count in leaders
+        )
+        or "—"
+    )
+    await message.answer(
+        t(
+            "referral_admin_stats",
+            lang,
+            total=total,
+            bonus=settings.bonus,
+            leaders=leaders_text,
+        )
+    )
 
 
 @router.message(Command("admin"))

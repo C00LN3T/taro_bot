@@ -38,6 +38,16 @@ MESSAGES = {
         "admin_panel": "Админ-панель. Выберите действие:",
         "admin_broadcast_prompt": "Отправьте текст рассылки или напишите 'отмена'.",
         "admin_broadcast_cancel": "Рассылка отменена.",
+        "referral_welcome": "Вы пришли по приглашению! Вам начислено {bonus} бонусных раскладов.",
+        "referral_notif_inviter": "Ваш друг активировал приглашение. Начислено +{bonus}. Баланс: {balance}.",
+        "invite_link": "Поделитесь ссылкой: {link}\nБонус за регистрацию: {bonus} бесплатных раскладов.",
+        "invite_disabled": "Реферальная система временно отключена.",
+        "referral_stats_user": "Вы пригласили: {count}\nБонусов осталось: {balance}",
+        "referral_bonus_updated": "Бонус за приглашение: {bonus}",
+        "referral_bonus_usage": "Используйте: /set_ref_bonus <число>",
+        "referral_system_enabled": "Реферальная система включена.",
+        "referral_system_disabled": "Реферальная система выключена.",
+        "referral_admin_stats": "Всего приглашённых: {total}\nТекущий бонус: {bonus}\nТоп-10:\n{leaders}",
     },
     "en": {
         "welcome": "Hi! I'm the Fortune Teller bot. I can draw tarot spreads for you.",
@@ -76,6 +86,16 @@ MESSAGES = {
         "admin_panel": "Admin panel. Choose an action:",
         "admin_broadcast_prompt": "Send broadcast text or type 'cancel'.",
         "admin_broadcast_cancel": "Broadcast cancelled.",
+        "referral_welcome": "You joined via a referral! You've received {bonus} bonus draws.",
+        "referral_notif_inviter": "Your friend started using the bot. +{bonus} bonus added. Balance: {balance}.",
+        "invite_link": "Share this link: {link}\nReward per signup: {bonus} free draws.",
+        "invite_disabled": "Referral system is temporarily disabled.",
+        "referral_stats_user": "Invited friends: {count}\nBonus balance: {balance}",
+        "referral_bonus_updated": "Referral bonus set to {bonus}.",
+        "referral_bonus_usage": "Usage: /set_ref_bonus <number>",
+        "referral_system_enabled": "Referral system enabled.",
+        "referral_system_disabled": "Referral system disabled.",
+        "referral_admin_stats": "Total invited: {total}\nCurrent bonus: {bonus}\nTop-10:\n{leaders}",
     },
 }
 
@@ -106,6 +126,8 @@ BUTTONS = {
         "admin_stats": "📊 Статистика",
         "admin_broadcast": "📢 Рассылка",
         "admin_back": "⬅️ В меню",
+        "invite": "🤝 Пригласить друга",
+        "referrals": "👥 Мои рефералы",
     },
     "en": {
         "tarot": "🔮 Tarot",
@@ -132,6 +154,8 @@ BUTTONS = {
         "admin_stats": "📊 Stats",
         "admin_broadcast": "📢 Broadcast",
         "admin_back": "⬅️ To menu",
+        "invite": "🤝 Invite a friend",
+        "referrals": "👥 My referrals",
     },
 }
 

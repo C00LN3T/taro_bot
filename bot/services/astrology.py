@@ -6,6 +6,7 @@ from datetime import date, datetime
 from sqlmodel import Session, select
 
 from ..models import SpreadHistory, ZodiacSign
+from .history import save_spread
 
 
 @dataclass
@@ -76,13 +77,13 @@ def short_portrait(sign: ZodiacSign) -> str:
     return "\n".join(lines)
 
 
-def save_history(session: Session, user_id: int, sign: ZodiacSign, result: str) -> None:
-    history = SpreadHistory(
+def save_history(session: Session, user_id: int, sign: ZodiacSign, result: str, daily_limit: int | None = None) -> None:
+    save_spread(
+        session,
         user_id=user_id,
-        type="astro",
+        spread_type="astro",
         spread_name=sign.name,
         input_data=sign.date_start,
         result=result,
+        daily_limit=daily_limit,
     )
-    session.add(history)
-    session.commit()
