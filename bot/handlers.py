@@ -332,13 +332,14 @@ async def cmd_help(message: Message) -> None:
 async def cmd_invite(message: Message) -> None:
     with session_scope(CONFIG.database_url) as session:
         user = ensure_user(session, message)
+        user_id = user.id
         lang = get_language(user)
         referral_settings = get_referral_settings(session)
     if not referral_settings.enabled:
         await message.answer(t("invite_disabled", lang))
         return
     bot_info = await message.bot.get_me()
-    link = f"https://t.me/{bot_info.username}?start=ref_{user.id}"
+    link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
     await message.answer(t("invite_link", lang, link=link, bonus=referral_settings.bonus))
 
 
