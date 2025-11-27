@@ -42,8 +42,6 @@ def apply_referral(
     inviter = session.get(User, inviter_id)
     if not inviter:
         return ReferralResult(inviter=None, bonus_applied=False, welcome_bonus_applied=False)
-    if not inviter.username:
-        return ReferralResult(inviter=None, bonus_applied=False, welcome_bonus_applied=False)
     existing_link = session.exec(
         select(Referral).where(Referral.invited_id == new_user.id)
     ).first()
