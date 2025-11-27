@@ -53,7 +53,27 @@ def result_actions_keyboard(lang: str = "ru", share_payload: str | None = None) 
 def admin_panel_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text=button_text("admin_stats", lang), callback_data="admin_stats")],
+        [InlineKeyboardButton(text=button_text("admin_referral_settings", lang), callback_data="admin_referral_settings")],
         [InlineKeyboardButton(text=button_text("admin_broadcast", lang), callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text=button_text("admin_back", lang), callback_data="admin_back")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def admin_referral_keyboard(bonus: int, welcome_bonus: int, enabled: bool, lang: str = "ru") -> InlineKeyboardMarkup:
+    status = "✅" if enabled else "⚪"
+    buttons = [
+        [
+            InlineKeyboardButton(text=button_text("admin_referral_decrease", lang), callback_data="ref_bonus_dec"),
+            InlineKeyboardButton(text=f"{button_text('referral_bonus_label', lang)}: {bonus}", callback_data="ref_bonus_show"),
+            InlineKeyboardButton(text=button_text("admin_referral_increase", lang), callback_data="ref_bonus_inc"),
+        ],
+        [
+            InlineKeyboardButton(text="–1", callback_data="ref_welcome_dec"),
+            InlineKeyboardButton(text=f"🎁 {welcome_bonus}", callback_data="ref_welcome_show"),
+            InlineKeyboardButton(text="+1", callback_data="ref_welcome_inc"),
+        ],
+        [InlineKeyboardButton(text=f"{status} {button_text('admin_referral_toggle', lang)}", callback_data="ref_toggle")],
         [InlineKeyboardButton(text=button_text("admin_back", lang), callback_data="admin_back")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)

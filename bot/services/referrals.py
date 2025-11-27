@@ -13,6 +13,7 @@ from .settings import ReferralSettings
 class ReferralResult:
     inviter: User | None
     bonus_applied: bool
+    welcome_bonus_applied: bool
 
 
 def parse_referral_payload(payload: str | None) -> int | None:
@@ -35,20 +36,23 @@ def apply_referral(
 ) -> ReferralResult:
     inviter_id = parse_referral_payload(start_payload)
     if not is_new_user or not settings.enabled or inviter_id is None:
-        return ReferralResult(inviter=None, bonus_applied=False)
+        return ReferralResult(inviter=None, bonus_applied=False, welcome_bonus_applied=False)
     if inviter_id == new_user.id:
-        return ReferralResult(inviter=None, bonus_applied=False)
+        return ReferralResult(inviter=None, bonus_applied=False, welcome_bonus_applied=False)
     inviter = session.get(User, inviter_id)
     if not inviter:
-        return ReferralResult(inviter=None, bonus_applied=False)
+        return ReferralResult(inviter=None, bonus_applied=False, welcome_bonus_applied=False)
+    if not inviter.username:
+        return ReferralResult(inviter=None, bonus_applied=False, welcome_bonus_applied=False)
     existing_link = session.exec(
         select(Referral).where(Referral.invited_id == new_user.id)
     ).first()
     if existing_link:
-        return ReferralResult(inviter=None, bonus_applied=False)
+        return ReferralResult(inviter=None, bonus_applied=False, welcome_bonus_applied=False)
 
     new_user.referred_by = inviter_id
-    new_user.free_spreads += settings.bonus
+    if settings.welcome_bonus > 0:
+        new_user.free_spreads += settings.welcome_bonus
     session.add(new_user)
     session.add(
         Referral(inviter_id=inviter_id, invited_id=new_user.id, created_at=datetime.utcnow())
@@ -58,4 +62,8 @@ def apply_referral(
     session.commit()
     session.refresh(inviter)
     session.refresh(new_user)
-    return ReferralResult(inviter=inviter, bonus_applied=True)
+    return ReferralResult(
+        inviter=inviter,
+        bonus_applied=True,
+        welcome_bonus_applied=settings.welcome_bonus > 0,
+    )
