@@ -39,6 +39,7 @@ def test_daily_limit_counter(session):
             )
         )
     session.commit()
-    remaining, count = handlers._remaining_limit(session, user.id)
+    remaining, count, free_spreads = handlers._remaining_limit(session, user.id)
     assert count == 2
+    assert free_spreads == 0
     assert remaining == handlers.CONFIG.daily_free_limit - 2

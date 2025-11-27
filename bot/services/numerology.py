@@ -6,6 +6,7 @@ from typing import Iterable
 from sqlmodel import Session, select
 
 from ..models import NumerologyText, SpreadHistory
+from .history import save_spread
 
 
 @dataclass
@@ -86,7 +87,13 @@ def compatibility(session: Session, first: tuple[int, int, int], second: tuple[i
     )
 
 
-def save_history(session: Session, user_id: int, payload: str, result: str) -> None:
-    history = SpreadHistory(user_id=user_id, type="numerology", spread_name="numerology", input_data=payload, result=result)
-    session.add(history)
-    session.commit()
+def save_history(session: Session, user_id: int, payload: str, result: str, daily_limit: int | None = None) -> None:
+    save_spread(
+        session,
+        user_id=user_id,
+        spread_type="numerology",
+        spread_name="numerology",
+        input_data=payload,
+        result=result,
+        daily_limit=daily_limit,
+    )

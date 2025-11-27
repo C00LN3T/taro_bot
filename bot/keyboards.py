@@ -7,6 +7,7 @@ def main_menu_keyboard(lang: str = "ru") -> ReplyKeyboardMarkup:
     buttons = [
         [KeyboardButton(text=button_text("tarot", lang))],
         [KeyboardButton(text=button_text("rune", lang)), KeyboardButton(text=button_text("metaphor", lang))],
+        [KeyboardButton(text=button_text("invite", lang)), KeyboardButton(text=button_text("referrals", lang))],
         [KeyboardButton(text=button_text("profile", lang)), KeyboardButton(text=button_text("help", lang))],
     ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
