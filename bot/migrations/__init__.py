@@ -35,5 +35,5 @@ def run_migrations(engine) -> None:
             if name in applied:
                 continue
             func(session)
-            session.exec(text("INSERT INTO migrations (name) VALUES (:name)"), {"name": name})
+            session.exec(text("INSERT INTO migrations (name) VALUES (:name)").bindparams(name=name))
             session.commit()
