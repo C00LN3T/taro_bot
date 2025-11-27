@@ -60,6 +60,12 @@ def actions_keyboard(lang: str, share_payload: str | None = None):
     return keyboards.result_actions_keyboard(lang, share_payload=share_payload)
 
 
+def _date_range(days: int) -> tuple[datetime, datetime]:
+    start = datetime.combine(datetime.utcnow().date() - timedelta(days=days - 1), time.min)
+    end = datetime.combine(datetime.utcnow().date() + timedelta(days=1), time.min)
+    return start, end
+
+
 def _remaining_limit(session, user_id: int) -> tuple[int, int]:
     start_day = datetime.combine(datetime.utcnow().date(), time.min)
     end_day = start_day + timedelta(days=1)
@@ -613,8 +619,13 @@ async def admin_stats(message: Message) -> None:
         await message.answer(t("admin_denied", config.default_language))
         logger.warning("admin_stats denied for %s", message.from_user.id)
         return
+    start_week, end_today = _date_range(7)
+    start_month, _ = _date_range(30)
     with session_scope(config.database_url) as session:
         total_users = session.exec(select(func.count()).select_from(User)).one()
+        new_users_week = session.exec(
+            select(func.count()).select_from(User).where(User.created_at >= start_week)
+        ).one()
         total_spreads = session.exec(select(func.count()).select_from(SpreadHistory)).one()
         start_day = datetime.combine(datetime.utcnow().date(), time.min)
         end_day = start_day + timedelta(days=1)
@@ -624,15 +635,75 @@ async def admin_stats(message: Message) -> None:
             .where(SpreadHistory.created_at >= start_day)
             .where(SpreadHistory.created_at < end_day)
         ).one()
+        week_spreads = session.exec(
+            select(func.count())
+            .select_from(SpreadHistory)
+            .where(SpreadHistory.created_at >= start_week)
+            .where(SpreadHistory.created_at < end_today)
+        ).one()
+        month_spreads = session.exec(
+            select(func.count())
+            .select_from(SpreadHistory)
+            .where(SpreadHistory.created_at >= start_month)
+            .where(SpreadHistory.created_at < end_today)
+        ).one()
+        active_users_week = session.exec(
+            select(func.count(func.distinct(SpreadHistory.user_id)))
+            .where(SpreadHistory.created_at >= start_week)
+            .where(SpreadHistory.created_at < end_today)
+        ).one()
         by_type = session.exec(
             select(SpreadHistory.type, func.count()).group_by(SpreadHistory.type)
         ).all()
-        type_lines = "\n".join(f"{item[0]}: {item[1]}" for item in by_type)
+        by_spread = session.exec(
+            select(SpreadHistory.type, SpreadHistory.spread_name, func.count())
+            .group_by(SpreadHistory.type, SpreadHistory.spread_name)
+            .order_by(func.count().desc())
+            .limit(10)
+        ).all()
+        top_users = session.exec(
+            select(User.username, User.first_name, User.telegram_id, func.count())
+            .select_from(SpreadHistory)
+            .join(User, User.id == SpreadHistory.user_id)
+            .group_by(User.id)
+            .order_by(func.count().desc())
+            .limit(5)
+        ).all()
+        daily_activity = session.exec(
+            select(func.date(SpreadHistory.created_at), func.count())
+            .where(SpreadHistory.created_at >= start_week)
+            .where(SpreadHistory.created_at < end_today)
+            .group_by(func.date(SpreadHistory.created_at))
+            .order_by(func.date(SpreadHistory.created_at))
+        ).all()
+        type_lines = "\n".join(f"• {item[0]}: {item[1]}" for item in by_type) or "—"
+        spread_lines = (
+            "\n".join(
+                f"• {item[0]} / {item[1]}: {item[2]}" if item[1] else f"• {item[0]}: {item[2]}"
+                for item in by_spread
+            )
+            or "—"
+        )
+        user_lines = (
+            "\n".join(
+                f"• {('@' + username) if username else (first_name or 'User ' + str(telegram_id))}: {count}"
+                for username, first_name, telegram_id, count in top_users
+            )
+            or "—"
+        )
+        daily_lines = (
+            "\n".join(f"• {str(day)}: {count}" for day, count in daily_activity) or "—"
+        )
         text = (
-            f"Пользователи: {total_users}\n"
-            f"Раскладов всего: {total_spreads}\n"
-            f"За сегодня: {today_spreads}\n"
-            f"По типам:\n{type_lines}"
+            "📊 Статистика бота"\
+            f"\nПользователи: {total_users} (новых за 7 дней: {new_users_week})"\
+            f"\nАктивные за 7 дней: {active_users_week}"\
+            f"\nРаскладов всего: {total_spreads}"\
+            f"\nСегодня: {today_spreads} | 7 дней: {week_spreads} | 30 дней: {month_spreads}"\
+            f"\n\nПо типам:\n{type_lines}"\
+            f"\n\nТоп раскладов:\n{spread_lines}"\
+            f"\n\nТоп-5 пользователей:\n{user_lines}"\
+            f"\n\nАктивность за 7 дней:\n{daily_lines}"
         )
         await message.answer(text)
 
