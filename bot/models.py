@@ -6,6 +6,11 @@ from typing import Optional
 from sqlmodel import Field, SQLModel
 
 
+class BotSettings(SQLModel, table=True):
+    id: Optional[int] = Field(default=1, primary_key=True)
+    response_delay_seconds: int = 0
+
+
 class User(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     telegram_id: int = Field(index=True, unique=True)
