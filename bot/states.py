@@ -24,3 +24,7 @@ class NumerologyStates(StatesGroup):
 
 class AstroStates(StatesGroup):
     waiting_for_birthdate = State()
+
+
+class AdminStates(StatesGroup):
+    waiting_for_broadcast_text = State()

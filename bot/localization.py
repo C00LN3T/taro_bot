@@ -34,6 +34,9 @@ MESSAGES = {
         "random_result": "Случайный расклад ({system}):\n{result}",
         "metaphor": "Метафора дня: {text}",
         "rune": "Руна дня: {name} — {meaning}",
+        "admin_panel": "Админ-панель. Выберите действие:",
+        "admin_broadcast_prompt": "Отправьте текст рассылки или напишите 'отмена'.",
+        "admin_broadcast_cancel": "Рассылка отменена.",
     },
     "en": {
         "welcome": "Hi! I'm the Fortune Teller bot. I can draw tarot, numerology or astrology spreads for you.",
@@ -68,6 +71,9 @@ MESSAGES = {
         "random_result": "Random spread ({system}):\n{result}",
         "metaphor": "Metaphor of the day: {text}",
         "rune": "Rune of the day: {name} — {meaning}",
+        "admin_panel": "Admin panel. Choose an action:",
+        "admin_broadcast_prompt": "Send broadcast text or type 'cancel'.",
+        "admin_broadcast_cancel": "Broadcast cancelled.",
     },
 }
 
@@ -98,6 +104,9 @@ BUTTONS = {
         "tarot_career": "Карьера/финансы",
         "rune": "🪄 Руна дня",
         "metaphor": "💭 Метафора дня",
+        "admin_stats": "📊 Статистика",
+        "admin_broadcast": "📢 Рассылка",
+        "admin_back": "⬅️ В меню",
     },
     "en": {
         "tarot": "🔮 Tarot",
@@ -124,6 +133,9 @@ BUTTONS = {
         "tarot_career": "Career/finance",
         "rune": "🪄 Rune of the day",
         "metaphor": "💭 Metaphor of the day",
+        "admin_stats": "📊 Stats",
+        "admin_broadcast": "📢 Broadcast",
+        "admin_back": "⬅️ To menu",
     },
 }
 
