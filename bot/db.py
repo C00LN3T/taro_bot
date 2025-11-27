@@ -7,8 +7,9 @@ from typing import Iterator
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from .config import BotConfig
-from .models import NumerologyText, TarotCard, User, ZodiacSign
+from .models import BotSettings, NumerologyText, TarotCard, User, ZodiacSign
 from .seed_data import ensure_seed, numerology_seed, tarot_seed, zodiac_seed
+from .services.settings import get_bot_settings
 
 
 _engine = None
@@ -25,6 +26,7 @@ def init_db(config: BotConfig) -> None:
     engine = get_engine(config.database_url)
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
+        get_bot_settings(session)
         ensure_seed(TarotCard, session, tarot_seed())
         ensure_seed(NumerologyText, session, numerology_seed())
         ensure_seed(ZodiacSign, session, zodiac_seed())
