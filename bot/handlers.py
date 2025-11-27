@@ -73,6 +73,11 @@ def actions_keyboard(lang: str, share_payload: str | None = None):
     return keyboards.result_actions_keyboard(lang, share_payload=share_payload)
 
 
+async def _feature_unavailable(message: Message, state: FSMContext, lang: str) -> None:
+    await state.clear()
+    await message.answer(t("feature_unavailable", lang), reply_markup=main_menu_markup(lang))
+
+
 def _date_range(days: int) -> tuple[datetime, datetime]:
     start = datetime.combine(datetime.utcnow().date() - timedelta(days=days - 1), time.min)
     end = datetime.combine(datetime.utcnow().date() + timedelta(days=1), time.min)
@@ -515,42 +520,10 @@ async def tarot_back_to_menu(message: Message, state: FSMContext) -> None:
 
 @router.message(F.text.in_({button_text("random", "ru"), button_text("random", "en")}))
 async def random_spread(message: Message, state: FSMContext) -> None:
-    import random
-
     with session_scope(CONFIG.database_url) as session:
         user = ensure_user(session, message)
         lang = get_language(user)
-        allowed, note = _limit_guard(session, user.id, lang)
-        if not allowed:
-            await message.answer(note)
-            return
-        systems = ["tarot", "numerology", "astro", "rune", "metaphor"]
-        system = random.choice(systems)
-        if system == "tarot":
-            result = tarot.spread_three_cards(session)
-            tarot.save_history(session, user.id, system, "random_tarot", json.dumps({}), result)
-        elif system == "numerology":
-            today = datetime.utcnow().date()
-            destiny = numerology.destiny_number(session, today.day, today.month, today.year)
-            result = f"{destiny.title}: {destiny.number}\n{destiny.description}"
-            numerology.save_history(session, user.id, json.dumps({"random": True}), result)
-        elif system == "astro":
-            today = datetime.utcnow().date()
-            sign = astrology.zodiac_for_date(session, today)
-            result = astrology.short_portrait(sign) if sign else t("bad_date", lang)
-            if sign:
-                astrology.save_history(session, user.id, sign, result)
-        elif system == "rune":
-            name, meaning = extra.rune_of_the_day()
-            result = t("rune", lang, name=name, meaning=meaning)
-            log_history(session, user.id, "rune", name, {}, result)
-        else:
-            text = extra.metaphor_of_the_day()
-            result = t("metaphor", lang, text=text)
-            log_history(session, user.id, "metaphor", "metaphor_day", {}, result)
-        await maybe_delay_response(session)
-        await message.answer(t("random_result", lang, system=system, result=result), reply_markup=actions_keyboard(lang, share_payload=result))
-        await message.answer(note)
+    await _feature_unavailable(message, state, lang)
 
 
 @router.message(F.text.in_({button_text("rune", "ru"), button_text("rune", "en")}))
@@ -592,187 +565,87 @@ async def numerology_entry(message: Message, state: FSMContext) -> None:
     with session_scope(CONFIG.database_url) as session:
         user = ensure_user(session, message)
         lang = get_language(user)
-    await state.set_state(NumerologyStates.choosing_calculation)
-    await message.answer(t("numerology_prompt", lang), reply_markup=keyboards.numerology_options_keyboard(lang))
+    await _feature_unavailable(message, state, lang)
 
 
 @router.message(NumerologyStates.choosing_calculation, F.text.in_({button_text("destiny", "ru"), button_text("destiny", "en")}))
 async def numerology_choose_destiny(message: Message, state: FSMContext) -> None:
-    await state.set_state(NumerologyStates.waiting_for_birthdate)
     with session_scope(CONFIG.database_url) as session:
         user = ensure_user(session, message)
         lang = get_language(user)
-    await message.answer(t("ask_birthdate", lang))
+    await _feature_unavailable(message, state, lang)
 
 
 @router.message(NumerologyStates.choosing_calculation, F.text.in_({button_text("name", "ru"), button_text("name", "en")}))
 async def numerology_choose_name(message: Message, state: FSMContext) -> None:
-    await state.set_state(NumerologyStates.waiting_for_name)
     with session_scope(CONFIG.database_url) as session:
         user = ensure_user(session, message)
         lang = get_language(user)
-    await message.answer(t("name_prompt", lang))
+    await _feature_unavailable(message, state, lang)
 
 
 @router.message(NumerologyStates.choosing_calculation, F.text.in_({button_text("personality", "ru"), button_text("personality", "en")}))
 async def numerology_choose_personality(message: Message, state: FSMContext) -> None:
-    await state.set_state(NumerologyStates.waiting_for_name)
-    await state.update_data(require_birthdate=True)
     with session_scope(CONFIG.database_url) as session:
         user = ensure_user(session, message)
         lang = get_language(user)
-    await message.answer(t("name_prompt", lang))
+    await _feature_unavailable(message, state, lang)
 
 
 @router.message(NumerologyStates.choosing_calculation, F.text.in_({button_text("compat", "ru"), button_text("compat", "en")}))
 async def numerology_choose_compatibility(message: Message, state: FSMContext) -> None:
-    await state.set_state(NumerologyStates.waiting_for_birthdate)
-    await state.update_data(compatibility=True)
     with session_scope(CONFIG.database_url) as session:
         user = ensure_user(session, message)
         lang = get_language(user)
-    await message.answer(t("compat_first", lang))
+    await _feature_unavailable(message, state, lang)
 
 
 @router.message(NumerologyStates.choosing_calculation, F.text.in_({button_text("back", "ru"), button_text("back", "en")}))
 async def numerology_back(message: Message, state: FSMContext) -> None:
-    await state.clear()
     with session_scope(CONFIG.database_url) as session:
         user = ensure_user(session, message)
         lang = get_language(user)
-    await reset_to_menu(message, lang, state)
+    await _feature_unavailable(message, state, lang)
 
 
 @router.message(NumerologyStates.waiting_for_birthdate)
 async def numerology_birthdate(message: Message, state: FSMContext) -> None:
-    parsed = parse_birthdate(message.text)
     with session_scope(CONFIG.database_url) as session:
         user = ensure_user(session, message)
         lang = get_language(user)
-        if not parsed:
-            await message.answer(t("bad_date", lang))
-            return
-        data = await state.get_data()
-        allowed, note = _limit_guard(session, user.id, lang)
-        if not allowed:
-            await message.answer(note)
-            await state.clear()
-            return
-        if data.get("require_birthdate"):
-            name = data.get("name", message.from_user.full_name)
-            results = numerology.personality_card(session, name, parsed.day, parsed.month, parsed.year)
-            text_lines = ["Краткая нумерологическая карта личности:"]
-            for item in results:
-                text_lines.append(f"{item.title}: {item.number} — {item.description}")
-            payload = json.dumps({"name": name, "birthdate": parsed.date().isoformat()})
-            numerology.save_history(session, user.id, payload, "\n".join(text_lines))
-            await maybe_delay_response(session)
-            await message.answer("\n".join(text_lines), reply_markup=actions_keyboard(lang, share_payload="\n".join(text_lines)))
-            await message.answer(note)
-            await state.clear()
-            return
-        if data.get("compatibility") and not data.get("first_birthdate"):
-            await state.update_data(first_birthdate=parsed)
-            await state.set_state(NumerologyStates.waiting_for_second_birthdate)
-            await message.answer(t("compat_second", lang))
-            return
-        result = numerology.destiny_number(session, parsed.day, parsed.month, parsed.year)
-        profile_user = user
-        if profile_user:
-            profile_user.birth_date = parsed.date()
-            session.add(profile_user)
-            session.commit()
-        numerology.save_history(session, user.id, json.dumps({"birthdate": parsed.date().isoformat()}), f"{result.title}: {result.number}\n{result.description}")
-        await maybe_delay_response(session)
-        await message.answer(f"{result.title}: {result.number}\n{result.description}", reply_markup=actions_keyboard(lang, share_payload=f"{result.title}: {result.number}"))
-        await message.answer(note)
-    await state.clear()
+    await _feature_unavailable(message, state, lang)
 
 
 @router.message(NumerologyStates.waiting_for_second_birthdate)
 async def numerology_second_birthdate(message: Message, state: FSMContext) -> None:
-    parsed = parse_birthdate(message.text)
     with session_scope(CONFIG.database_url) as session:
         user = ensure_user(session, message)
         lang = get_language(user)
-        if not parsed:
-            await message.answer(t("bad_date", lang))
-            return
-        data = await state.get_data()
-        first: datetime = data.get("first_birthdate")
-        compat = numerology.compatibility(session, (first.day, first.month, first.year), (parsed.day, parsed.month, parsed.year))
-        text = (
-            f"Совместимость чисел судьбы: {compat.score}/10\n"
-            f"Первый: {compat.first_number}, Второй: {compat.second_number}\n{compat.description}"
-        )
-        numerology.save_history(session, user.id, json.dumps({"first": first.date().isoformat(), "second": parsed.date().isoformat()}), text)
-        await maybe_delay_response(session)
-        await message.answer(text, reply_markup=actions_keyboard(lang, share_payload=text))
-    await state.clear()
+    await _feature_unavailable(message, state, lang)
 
 
 @router.message(NumerologyStates.waiting_for_name)
 async def numerology_name(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    name = message.text.strip()
     with session_scope(CONFIG.database_url) as session:
         user = ensure_user(session, message)
         lang = get_language(user)
-        allowed, note = _limit_guard(session, user.id, lang)
-        if not allowed:
-            await message.answer(note)
-            await state.clear()
-            return
-        if data.get("require_birthdate"):
-            await state.update_data(name=name)
-            await state.set_state(NumerologyStates.waiting_for_birthdate)
-            await message.answer(t("ask_birthdate", lang))
-            return
-        result = numerology.name_number(session, name)
-        numerology.save_history(session, user.id, json.dumps({"name": name}), f"{result.title}: {result.number}\n{result.description}")
-        await maybe_delay_response(session)
-        await message.answer(f"{result.title}: {result.number}\n{result.description}", reply_markup=actions_keyboard(lang, share_payload=f"{result.title}: {result.number}"))
-        await message.answer(note)
-    await state.clear()
+    await _feature_unavailable(message, state, lang)
 
 
 @router.message(F.text.in_({button_text("astro", "ru"), button_text("astro", "en")}))
 async def astro_entry(message: Message, state: FSMContext) -> None:
-    await state.set_state(AstroStates.waiting_for_birthdate)
     with session_scope(CONFIG.database_url) as session:
         user = ensure_user(session, message)
         lang = get_language(user)
-    await message.answer(t("astro_prompt", lang))
+    await _feature_unavailable(message, state, lang)
 
 
 @router.message(AstroStates.waiting_for_birthdate)
 async def astro_birthdate(message: Message, state: FSMContext) -> None:
-    parsed = parse_birthdate(message.text)
     with session_scope(CONFIG.database_url) as session:
         user = ensure_user(session, message)
         lang = get_language(user)
-        if not parsed:
-            await message.answer(t("bad_date", lang))
-            return
-        allowed, note = _limit_guard(session, user.id, lang)
-        if not allowed:
-            await message.answer(note)
-            await state.clear()
-            return
-        sign = astrology.zodiac_for_date(session, parsed.date())
-        if user:
-            user.birth_date = parsed.date()
-            session.add(user)
-            session.commit()
-        await state.clear()
-        if not sign:
-            await message.answer(t("bad_date", lang))
-            return
-        text = astrology.short_portrait(sign)
-        astrology.save_history(session, user.id, sign, text)
-        await maybe_delay_response(session)
-        await message.answer(text, reply_markup=actions_keyboard(lang, share_payload=text))
-        await message.answer(note)
+    await _feature_unavailable(message, state, lang)
 
 
 @router.message(F.text.in_({button_text("help", "ru"), button_text("help", "en")}))

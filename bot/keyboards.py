@@ -5,8 +5,7 @@ from .localization import button_text
 
 def main_menu_keyboard(lang: str = "ru") -> ReplyKeyboardMarkup:
     buttons = [
-        [KeyboardButton(text=button_text("tarot", lang)), KeyboardButton(text=button_text("numerology", lang))],
-        [KeyboardButton(text=button_text("astro", lang)), KeyboardButton(text=button_text("random", lang))],
+        [KeyboardButton(text=button_text("tarot", lang))],
         [KeyboardButton(text=button_text("rune", lang)), KeyboardButton(text=button_text("metaphor", lang))],
         [KeyboardButton(text=button_text("profile", lang)), KeyboardButton(text=button_text("help", lang))],
     ]
